@@ -149,4 +149,4 @@ evalM (If0 c l r) = do
   if c' == 0 then evalM l else evalM r
 
 interpAE :: String -> Maybe Int
-interpAE _ = Nothing
+interpAE = evalM . parseAE
