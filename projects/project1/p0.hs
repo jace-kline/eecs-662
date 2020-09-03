@@ -89,14 +89,64 @@ parseAE = parseString expr
 -- you see fit, but do not change the function signatures.  Note that only
 -- Exercise 4 requires you to integrate the parser above.
 
+fromMaybe :: Maybe a -> a
+fromMaybe (Just x) = x
+fromMaybe _        = error "Error: Attempt to unwrap value from Nothing constructor"
+
+evalAEMaybeBinaryOp :: AE -> AE -> (Int -> Int -> Int) -> (Int -> Int -> Bool) -> Maybe Int
+evalAEMaybeBinaryOp l r op p =
+  let (l', r') = (evalAEMaybe l, evalAEMaybe r)
+  in case (l', r') of
+    (Nothing, _) -> Nothing
+    (_, Nothing) -> Nothing
+    _            ->
+      let (l'', r'') = (fromMaybe l', fromMaybe r')
+      in if p l'' r'' then Just $ l'' `op` r'' else Nothing
+
+
+-- (>>=) :: Maybe a -> (a -> Maybe a) -> Maybe a
+evalMBinaryOp :: AE -> AE -> (Int -> Int -> Int) -> (Int -> Int -> Bool) -> Maybe Int
+evalMBinaryOp l r op p = do
+  l' <- evalM l
+  r' <- evalM r
+  if p l' r' then return $ l' `op` r' else Nothing
+
 evalAE :: AE -> Int
-evalAE _ = 0
+evalAE (Num x) = if x < 0 then error "Error: Negative Number Primitive" else x
+evalAE (Plus l r) = evalAE l + evalAE r
+evalAE (Minus l r) = 
+  let exp = evalAE l - evalAE r
+  in if exp > 0 then exp else error "Error: Negative Number obtained on subtraction"
+evalAE (Mult l r) = evalAE l * evalAE r
+evalAE (Div l r) =
+  let
+    r' = evalAE r 
+    exp = evalAE l `div` r'
+  in if r' == 0 then error "Error: Divide by 0" else exp
+evalAE (If0 c e1 e2) = if evalAE c == 0 then evalAE e1 else evalAE e2
+
 
 evalAEMaybe :: AE -> Maybe Int
-evalAEMaybe _ = Nothing
+evalAEMaybe (Num x) = if x < 0 then Nothing else Just x
+evalAEMaybe (Plus l r) = evalAEMaybeBinaryOp l r (+) (\l' r' -> True)
+evalAEMaybe (Minus l r) = evalAEMaybeBinaryOp l r (-) (\l' r' -> l' >= r')
+evalAEMaybe (Mult l r) = evalAEMaybeBinaryOp l r (*) (\l' r' -> True)
+evalAEMaybe (Div l r) = evalAEMaybeBinaryOp l r div (\l' r' -> r' /= 0)
+evalAEMaybe (If0 c l r) =
+  case evalAEMaybe c of
+    Nothing -> Nothing
+    (Just c') -> if c' == 0 then evalAEMaybe l else evalAEMaybe r
+
 
 evalM :: AE -> Maybe Int
-evalM _ = Nothing
+evalM (Num x) = if x < 0 then Nothing else Just x
+evalM (Plus l r) = evalMBinaryOp l r (+) (\l' r' -> True)
+evalM (Minus l r) = evalMBinaryOp l r (-) (\l' r' -> l' >= r')
+evalM (Mult l r) = evalMBinaryOp l r (*) (\l' r' -> True)
+evalM (Div l r) = evalMBinaryOp l r div (\l' r' -> r' /= 0)
+evalM (If0 c l r) = do
+  c' <- evalM c
+  if c' == 0 then evalM l else evalM r
 
 interpAE :: String -> Maybe Int
 interpAE _ = Nothing
