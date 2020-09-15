@@ -1,23 +1,44 @@
-module Test where
+module Tests where
 
 import System.Random
 import Test.QuickCheck
-import P0 (parseAE, evalAE, evalAEMaybe, evalM, interpAE)
+import P0 (AE, parseAE, evalAE, evalAEMaybe, evalM, interpAE)
 
-testEvaluator eval s n = (eval . parseAE) s === n
--- prop = (evalAE . parseAE) "5" === 5
+testEvalValid :: Int -> IO ()
+testEvalValid n = do
+    pairs <- genAETests n
+    let lifted_pairs = map (\(s,v) -> (s, liftValid v)) pairs
+    putStrLn "Generating random valid AE test expressions..."
+    putStrLn "Testing evalAE (1st implementation) under valid cases:"
+    sequence_ $ map (testEvalProp prop_evalAE) pairs
+    putStrLn "Testing evalAEMaybe (2nd implementation) under valid cases:"
+    sequence_ $ map (testEvalProp prop_evalAEMaybe) lifted_pairs
+    putStrLn "Testing evalM (3rd implementation) under valid cases:"
+    sequence_ $ map (testEvalProp prop_evalM) lifted_pairs
 
-valid_cases :: [(String, Int)]
-valid_cases = [
-    ("0",0)
-    , ("5 + 5", 5 + 5)
-    , ("7 - 5", 7 - 5)
-    , ("8 * 3", 8 * 3)
-    , ("10 / 5", 10 `div` 5)
-    , ("if 0 then 3 else 4", 3)
-    , ("5 + 4 - 6", 5 + 4 - 6)
-    , ("5 + 4 * 6", 5 + 4 * 6)
-    , ("10 + 10 / 5", 10 + 10 `div` 5)]
+testEvalInvalid :: IO ()
+testEvalInvalid = do
+    putStrLn "Testing invalid AE expressions..."
+    putStrLn "Testing evalAEMaybe (2nd implementation) under invalid cases:"
+    sequence_ $ map (testEvalProp prop_evalAEMaybe) bad_cases
+    putStrLn "Testing evalM (3rd implementation) under invalid cases:"
+    sequence_ $ map (testEvalProp prop_evalM) bad_cases
+
+prop_evalAE s n = (evalAE . parseAE) s === n
+prop_evalAEMaybe s maybe_n = (evalAEMaybe . parseAE) s === maybe_n
+prop_evalM s maybe_n = interpAE s === maybe_n
+
+liftValid n = if n < 0 then Nothing else Just n
+
+testEvalProp p (s,v) = putStrLn ("AE expression: " ++ s) >> (quickCheck . verbose) (p s v)
+
+bad_cases = zip [
+    "2 - 3"
+    , "16 - 22"
+    , "100 - 1000"
+    , "5 / 0"
+    , "20 / 0"
+    , "100 / 0" ] (repeat (Nothing :: Maybe Int))
 
 mkValidInt :: (RandomGen g) => g -> (Int -> Bool) -> (Int, g)
 mkValidInt g constraint =
@@ -36,7 +57,7 @@ shouldTestIf0 g = shouldTest g 5
 
 -- expand arith expression once every 3 times
 shouldExpandArith :: (RandomGen g) => g -> (Bool, g)
-shouldExpandArith g = shouldTest g 3
+shouldExpandArith g = shouldTest g 2
 
 genAETests :: Int -> IO [(String, Int)]
 genAETests n = do
@@ -92,7 +113,7 @@ opConstraint :: String -> Int -> Int -> Bool
 opConstraint " + " l r = positive r
 opConstraint " - " l r = l >= r
 opConstraint " * " l r = positive r
-opConstraint " / " l r = l >= r && r > 0
+opConstraint " / " l r = positive r
 opConstraint _ _ _ = error "Invalid operator given"
 
 positive :: Int -> Bool
