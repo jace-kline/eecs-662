@@ -30,7 +30,7 @@ prop_evalM s maybe_n = interpAE s === maybe_n
 
 liftValid n = if n < 0 then Nothing else Just n
 
-testEvalProp p (s,v) = putStrLn ("AE expression: " ++ s) >> (quickCheck . verbose) (p s v)
+testEvalProp p (s,v) = putStrLn ("AE expression: " ++ s) >> (verboseCheckWith stdArgs { maxSize = 1 }) (p s v)
 
 bad_cases = zip [
     "2 - 3"
