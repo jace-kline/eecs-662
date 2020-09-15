@@ -1,6 +1,0 @@
-AE ::=    N
-	| AE + AE
-	| AE - AE
-	| AE * AE
-	| AE / AE
-	| if0 AE then AE else AE
