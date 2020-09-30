@@ -4,14 +4,17 @@ module Test where
 import P1
 import Test.QuickCheck
 import Data.Char
+import Data.List
 
 type Length = Int
 
 numConstructors :: Int
 numConstructors = 10
 
-instance Arbitrary BBAE where
-    arbitrary = sized arbitraryBBAE
+instance Arbitrary TBBAE where
+    arbitrary = do
+        b <- (arbitrary :: Gen Bool)
+        return $ if b then TNum else TBool
 
 arbitraryNum :: Gen BBAE
 arbitraryNum = (arbitrary :: Gen Int) >>= \x -> if x >= 0 then return (Num x) else arbitraryNum
@@ -28,43 +31,86 @@ arbitraryId = do
 positive :: Int -> Int
 positive n = if n < 0 then (-1) * n else n
 
-arbitraryBBAE :: Int -> Gen BBAE
-arbitraryBBAE 0 = do
-    b <- (arbitrary :: Gen Bool)
-    if b then arbitraryNum else arbitraryBoolean
-arbitraryBBAE n = do
-    k <- choose (1, numConstructors)
-    case k of
-        1 -> arbitraryNum
-        2 -> binary Plus
-        3 -> binary Minus
-        4 -> do
-            id <- arbitraryId
-            bexp <- arbitraryRecurse
-            exp <- arbitraryRecurse
-            return $ Bind id bexp exp
-        5 -> arbitraryId >>= \s -> return $ Id s
-        6 -> arbitraryBoolean
-        7 -> binary And
-        8 -> binary Leq
-        9 -> arbitraryRecurse >>= \exp -> return $ IsZero exp
-        10 -> do
-            c <- arbitraryRecurse
-            l <- arbitraryRecurse
-            r <- arbitraryRecurse
-            return $ If c l r
-        _ -> error "Invalid value generated"
+
+instance Arbitrary BBAE where
+    arbitrary = sized $ \n -> do
+        b <- (arbitrary :: Gen Bool)
+        genExp [] (if b then TNum else TBool) (positive n)
+
+genExp :: Cont -> TBBAE -> Int -> Gen BBAE
+genExp cont t n = case n of 
+    0 -> do
+        b <- (arbitrary :: Gen Bool)
+        if b 
+            then genPrimitive 
+            else genId
+    _ -> do
+        k <- choose (1, numConstructors)
+        case k of
+            1 -> genBind
+            2 -> genId
+            3 -> genIf
+            _ -> do
+                k' <- (choose (1, if t == TNum then 3 else 4) :: Gen Int)
+                case t of
+                    TNum -> case k' of
+                        1 -> arbitraryNum
+                        2 -> genPlus
+                        3 -> genMinus
+                        _ -> error "error"
+                    TBool -> case k' of
+                        1 -> arbitraryBoolean
+                        2 -> genAnd
+                        3 -> genLeq
+                        4 -> genIsZero
+                        _ -> error "error"
     where
-        arbitraryRecurse :: Gen BBAE
-        arbitraryRecurse = arbitraryBBAE ((positive n) `div` 2)
-        binary :: (BBAE -> BBAE -> BBAE) -> Gen BBAE
-        binary constructor = do
-            l' <- arbitraryRecurse
-            r' <- arbitraryRecurse
-            return $ constructor l' r'
+        recurse cont t = do
+            k <- (choose (1,5) :: Gen Int)
+            genExp cont t (n `div` k)
+        genPrimitive = case t of
+            TBool -> arbitraryBoolean
+            TNum -> arbitraryNum
+        genBind = do
+            id <- arbitraryId
+            t' <- (arbitrary :: Gen TBBAE)
+            bexp <- recurse cont t'
+            exp <- recurse ((id,t'):cont) t
+            return $ Bind id bexp exp
+        genId =
+            let cont' = filter (\(_,t') -> t' == t) $ nubBy (\x y -> fst x == fst y) cont
+                l = length cont'
+            in if l == 0 
+                then recurse cont t
+                else do
+                    i <- choose (0, l - 1)
+                    let (id,_) = cont' !! i
+                    return $ Id id
+        genIf = do
+            c <- recurse cont TBool
+            l <- recurse cont t
+            r <- recurse cont t
+            return $ If c l r
+        genPlus = do
+            l <- recurse cont TNum
+            r <- recurse cont TNum
+            return $ Plus l r
+        genMinus = do
+            l <- recurse cont TNum
+            r <- recurse cont TNum
+            return $ Minus l r
+        genAnd = do
+            l <- recurse cont TBool
+            r <- recurse cont TBool
+            return $ And l r
+        genLeq = do
+            l <- recurse cont TNum
+            r <- recurse cont TNum
+            return $ Leq l r
+        genIsZero = do
+            e <- recurse cont TNum
+            return $ IsZero e
 
 
--- newtype ValidBBAE = ValidBBAE { toBBAE :: BBAE }
---     deriving (Eq, Show)
 
--- instance Arbitrary ValidBBAE where
+
