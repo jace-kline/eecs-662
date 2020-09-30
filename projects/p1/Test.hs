@@ -111,6 +111,36 @@ genExp cont t n = case n of
             e <- recurse cont TNum
             return $ IsZero e
 
+-- we assume the evalM function is implemented correctly
+-- compare final type constructor with the correct corresponding
+-- TBBAE constructor to determine if the correct type evaluation was made
+prop_testTBBAE :: BBAE -> Property
+prop_testTBBAE e = collect resultStr p
+    where
+        t = typeofM [] e
+        e_val = evalM [] e
+        p = case e_val of
+            Just (Num a) -> t == Just TNum
+            Just (Boolean b) -> t == Just TBool
+            _ -> True
+        strEVal = "EvalM: " ++ show e_val
+        strType = "Type: " ++ show t
+        resultStr = strEVal ++ " <--> " ++ strType
 
+prop_testBBAE :: BBAE -> Property
+prop_testBBAE e = collect resultStr $ all id [evalS_val == evalM_val, evalS_val == evalT_val, evalM_val == evalT_val]
+    where
+        evalS_val = evalS e
+        evalM_val = evalM [] e
+        evalT_val = evalT e
+        strS = "evalS: " ++ show evalS_val
+        strM = "evalM: " ++ show evalM_val
+        strT = "evalT: " ++ show evalT_val
+        resultStr = strS ++ " <--> " ++ strM ++ " <--> " ++ strT
 
-
+main :: IO ()
+main = do
+    putStrLn "Testing Evaluators:"
+    verboseCheck prop_testBBAE
+    putStrLn "Testing Type Checker:"
+    verboseCheck prop_testTBBAE
