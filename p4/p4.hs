@@ -1,8 +1,7 @@
 {-# LANGUAGE GADTs #-}
 
 -- import Control.Monad
-
--- Calculator language extended with an environment to hold defined variables
+import Data.List (zip4)
 
 data TFBAE where
   TNum :: TFBAE
@@ -111,18 +110,86 @@ evalBinLogic env l r op = do
 type Cont = [(String,TFBAE)]
 
 typeofM :: Cont -> FBAE -> (Maybe TFBAE)
-typeofM _ _ = Nothing
+typeofM _ (Num _) = return TNum
+typeofM c (Plus l r) = binTypeCheck c l r TNum TNum TNum
+typeofM c (Minus l r) = binTypeCheck c l r TNum TNum TNum
+typeofM c (Mult l r) = binTypeCheck c l r TNum TNum TNum
+typeofM c (Div l r) = binTypeCheck c l r TNum TNum TNum
+typeofM c (Bind id x b) = typeofM c x >>= \xt -> typeofM ((id,xt):c) b
+typeofM c (Lambda id t b) = do
+  rt <- typeofM ((id,t):c) b
+  return (t :->: rt)
+typeofM c (App f x) = do
+  (d :->: r) <- typeofM c f
+  d' <- typeofM c x
+  guard (d' == d)
+  return r
+typeofM c (Id id) = lookup id c
+typeofM _ (Boolean _) = return TBool
+typeofM c (And l r) = binTypeCheck c l r TBool TBool TBool
+typeofM c (Or l r) = binTypeCheck c l r TBool TBool TBool
+typeofM c (Leq l r) = binTypeCheck c l r TNum TNum TBool
+typeofM c (IsZero e) = typeofM c e >>= \TNum -> return TBool
+typeofM c (If cond l r) = do
+  TBool <- typeofM c cond
+  lt <- typeofM c l
+  rt <- typeofM c r
+  guard (lt == rt)
+  return lt
+typeofM c (Fix f) = do
+  (d :->: r) <- typeofM c f
+  return r
+typeofM _ (FixClosure _ _ _) = Nothing --This construct should never be constructed before evaluation
 
+
+binTypeCheck :: Cont -> FBAE -> FBAE -> TFBAE -> TFBAE -> TFBAE -> Maybe TFBAE
+binTypeCheck c l r lt rt rett = do
+  lt' <- typeofM c l
+  guard (lt' == lt)
+  rt' <- typeofM c r
+  guard (rt' == rt)
+  return rett
+
+
+guard :: Bool -> Maybe ()
+guard b = if b then Just () else Nothing
 
 -- Interpreter
 
 interp :: FBAE -> (Maybe FBAEVal)
-interp _ = Nothing
+interp exp = typeofM [] exp >> evalM [] exp
+
+
+
+
+
+-- TESTING --
+
+-- run all tests
+main :: IO ()
+main = do
+  let ts = zip4 [1..] tests test_types test_vals
+  sequence_ $ map (\(i,exp,t,v) -> printTestResult i exp t v) ts
+
+printTestResult :: Int -> FBAE -> TFBAE -> FBAEVal -> IO ()
+printTestResult i exp t v = do
+  let t' = typeofM [] exp
+  let v' = interp exp
+  putStrLn $ "\nTEST " ++ show i ++ "...\n"
+  putStrLn $ "Correct Type: " ++ show (Just t)
+  putStrLn $ "Actual Type: " ++ show t'
+  putStrLn $ "Correct Eval: " ++ show (Just v)
+  putStrLn $ "Actual Eval: " ++ show v'
+  putStrLn $ "Result: " ++ (if (t' == (Just t) && v' == (Just v))
+    then "SUCCESS"
+    else "FAIL")
+  
 
 -- Factorial function for testing evalM and typeofM.  the type of test1 should
 -- be TNum and the result of evaluating test1`should be (NumV 6).  Remember
 -- that Just is used to return both the value and type.
 
+-- Factorial function (evaluated at 3)
 test1 = (Bind "f" (Lambda "g" ((:->:) TNum TNum)
                     (Lambda "x" TNum (If (IsZero (Id "x")) (Num 1)
                                          (Mult (Id "x")
@@ -131,4 +198,71 @@ test1 = (Bind "f" (Lambda "g" ((:->:) TNum TNum)
                                                            (Num 1)))))))
          (App (Fix (Id "f")) (Num 3)))
 
+-- inc function (evaluated at 5)
 test2 = (Bind "inc" (Lambda "x" TNum (Plus (Id "x") (Num 1))) (App (Id "inc") (Num 5)))
+
+-- fibonacci function (evaluated at 10)
+test3 = (Bind "f" (Lambda "g" ((:->:) TNum TNum)
+                    (Lambda "x" TNum (If (IsZero (Id "x")) (Num 0)
+                                        (If (IsZero (Minus (Id "x") (Num 1))) (Num 1)
+                                          (Plus (App (Id "g")
+                                                      (Minus (Id "x")
+                                                              (Num 1)))
+                                                (App (Id "g")
+                                                      (Minus (Id "x")
+                                                              (Num 2))))))))
+          (App (Fix (Id "f")) (Num 10)))
+
+-- test boolean operators
+test4 = (And (Or (Boolean False) (Boolean True)) (Or (Boolean True) (Boolean False)))
+
+-- test an output value closure
+test5 = (Bind "t" (Num 4) 
+          (Bind "r" (Num 6) 
+            (Lambda "x" TNum
+              (Lambda "y" TNum
+                (Leq (Div (Id "t") (Id "x"))
+                        (Div (Id "r") (Id "y")))))))
+
+-- Supply one argument to the test5 to create a new closure
+test6 = (App test5 (Num 2))
+
+-- Supply the remaining argument to above
+test7 = (App test6 (Num 3))
+
+tests :: [FBAE]
+tests = [
+  test1,
+  test2,
+  test3,
+  test4,
+  test5,
+  test6,
+  test7]
+
+test_types :: [TFBAE]
+test_types = [
+  TNum, 
+  TNum, 
+  TNum, 
+  TBool, 
+  (TNum :->: (TNum :->: TBool)),
+  (TNum :->: TBool),
+  TBool]
+
+test_vals :: [FBAEVal]
+test_vals = [
+  NumV 6,
+  NumV 6,
+  NumV 55,
+  BooleanV True,
+  (ClosureV "x" 
+    (Lambda "y" TNum 
+      (Leq (Div (Id "t") (Id "x")) 
+            (Div (Id "r") (Id "y")))) 
+    [("r",NumV 6),("t",NumV 4)]),
+  (ClosureV "y"
+    (Leq (Div (Id "t") (Id "x")) 
+          (Div (Id "r") (Id "y")))
+    [("x",NumV 2),("r",NumV 6),("t",NumV 4)]),
+  BooleanV True]
